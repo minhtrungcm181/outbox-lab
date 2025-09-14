@@ -1,0 +1,33 @@
+# --- Build stage ---
+FROM golang:1.24.5-alpine AS builder
+RUN apk add --no-cache ca-certificates tzdata git
+ENV GOPROXY=https://proxy.golang.org,direct
+
+WORKDIR /src
+# 1) Copy only the modules you need
+COPY outbox-poller/ ./outbox-poller
+COPY shared/        ./shared
+COPY .env .env
+
+# 2) Create a temporary workspace so local module imports resolve
+RUN go work init ./outbox-poller ./shared
+
+# 3) (Optional but helps caching) download deps for both
+RUN go -C shared mod download || true
+RUN go -C outbox-poller mod download
+
+# 4) Build the poller binary from its module
+RUN go build -C outbox-poller -o /poller ./cmd/outbox-poller
+
+# --- Runtime stage ---
+FROM alpine:3.20
+ENV TZ=Asia/Ho_Chi_Minh
+RUN apk add --no-cache ca-certificates tzdata \
+ && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+ && echo $TZ > /etc/timezone \
+ && adduser -D -H -u 10001 appuser
+USER appuser
+WORKDIR /home/appuser
+
+COPY --from=builder /poller ./poller
+ENTRYPOINT ["./poller"]

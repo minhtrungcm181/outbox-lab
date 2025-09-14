@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kafka
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: outbox-poller-config
+  namespace: kafka
+data:
+  DB_DSN: "postgres://user:pass@postgres:5432/mydb?sslmode=disable"
+  KAFKA_BROKERS: "kafka:9092"
+  KAFKA_TOPIC: "notifications"
+  HTTP_PORT: "8080"

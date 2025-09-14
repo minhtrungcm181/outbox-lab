@@ -1,0 +1,96 @@
+# (Optional) Namespace
+---
+# Shared ConfigMap for both poller and gateway
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notification-hub-config
+  namespace: kafka
+data:
+  APP_ENV: "dev"
+  PORT: "8111"   # used by gateway HTTP
+  DB_DSN: "postgres://admin:admin@postgres.kafka.svc.cluster.local:5432/postgres?sslmode=disable"
+  KAFKA_BROKERS: "kafka-0.kafka-headless.kafka.svc.cluster.local:9092"
+  CORS_ALLOW_ORIGIN: "*"
+  LOG_LEVEL: "debug"
+  TZ: "Asia/Ho_Chi_Minh"
+---
+# Outbox Poller Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: outbox-poller
+  namespace: kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: outbox-poller
+  template:
+    metadata:
+      labels:
+        app: outbox-poller
+    spec:
+      containers:
+        - name: poller
+          image: minhtrung181/outbox-poller:latest
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: notification-hub-config
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+# Outbox Gateway Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: outbox-gateway
+  namespace: kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: outbox-gateway
+  template:
+    metadata:
+      labels:
+        app: outbox-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: minhtrung181/outbox-gateway:latest
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: notification-hub-config
+          ports:
+            - containerPort: 8111   # matches PORT in env
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+# Gateway Service (to expose HTTP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: outbox-gateway
+  namespace: kafka
+spec:
+  selector:
+    app: outbox-gateway
+  ports:
+    - name: http
+      port: 8111
+      targetPort: 8111
+      protocol: TCP
+  type: NodePort

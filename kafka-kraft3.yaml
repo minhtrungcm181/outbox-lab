@@ -1,0 +1,182 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kafka
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-config
+  namespace: kafka
+data:
+  kafka.properties: |
+    process.roles=broker,controller
+    node.id=1
+    controller.quorum.voters=1@kafka-0.kafka-headless.kafka.svc.cluster.local:9093
+    listeners=PLAINTEXT://kafka-0.kafka-headless.kafka.svc.cluster.local:9092,CONTROLLER://0.0.0.0:9093
+    advertised.listeners=PLAINTEXT://kafka-0.kafka-headless.kafka.svc.cluster.local:9092
+    controller.listener.names=CONTROLLER
+    listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+    inter.broker.listener.name=PLAINTEXT
+    log.dirs=/var/lib/kafka/data
+    offsets.topic.replication.factor=1
+    group.initial.rebalance.delay.ms=0
+    transaction.state.log.min.isr=1
+    transaction.state.log.replication.factor=1
+    num.partitions=3
+    default.replication.factor=1
+    min.insync.replicas=1
+    auto.create.topics.enable=true
+    log.retention.hours=168
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:7.5.0
+        ports:
+        - containerPort: 9092
+        - containerPort: 9093
+        env:
+        - name: CLUSTER_ID
+          value: "MkU3OEVBNTcwNTJENDM2Qk"
+        volumeMounts:
+        - name: kafka-data
+          mountPath: /var/lib/kafka/data
+        - name: kafka-config
+          mountPath: /etc/kafka/kafka.properties
+          subPath: kafka.properties
+        command:
+        - bash
+        - -c
+        - |
+          sleep 10
+          if [ ! -f /var/lib/kafka/data/meta.properties ]; then
+            kafka-storage format -t $CLUSTER_ID -c /etc/kafka/kafka.properties --ignore-formatted
+          fi
+          exec kafka-server-start /etc/kafka/kafka.properties
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 45
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      volumes:
+      - name: kafka-config
+        configMap:
+          name: kafka-config
+  volumeClaimTemplates:
+  - metadata:
+      name: kafka-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 3Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: kafka
+spec:
+  selector:
+    app: kafka
+  ports:
+  - name: kafka
+    port: 9092
+    targetPort: 9092
+  - name: controller
+    port: 9093
+    targetPort: 9093
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  namespace: kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-ui
+  template:
+    metadata:
+      labels:
+        app: kafka-ui
+    spec:
+      containers:
+      - name: kafka-ui
+        image: provectuslabs/kafka-ui:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+          value: "kafka-0.kafka-headless.kafka.svc.cluster.local:9092"
+        - name: KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL
+          value: "PLAINTEXT"
+        - name: DYNAMIC_CONFIG_ENABLED
+          value: "true"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ui
+  namespace: kafka
+spec:
+  selector:
+    app: kafka-ui
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    nodePort: 30080
+  type: NodePort
