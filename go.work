@@ -1,0 +1,10 @@
+go 1.24.5
+
+use (
+	./email-service
+	./gateway
+	./outbox-poller
+	./push-service
+	./shared
+	./sms-service
+)
