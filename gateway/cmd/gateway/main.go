@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"notification-hub/shared/pkg/db"
+	"notification-hub/shared/pkg/logger"
 	"strings"
 	"time"
 
@@ -90,7 +91,7 @@ func toNotificationModel(n domain.Notification) *notificationModel {
 
 func toOutboxModel(id string, payload datatypes.JSON) *outboxModel {
 	now := time.Now()
-	log.Println("timeOutbox: ", now)
+	logger.Info("outbox time: %v", now)
 	return &outboxModel{
 		ID:            id,
 		Payload:       payload,

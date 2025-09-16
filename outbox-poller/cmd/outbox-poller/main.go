@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"log"
 	"notification-hub/shared/pkg/config"
 	"notification-hub/shared/pkg/db"
+	"notification-hub/shared/pkg/logger"
+
 	"os/signal"
 	"strings"
 	"syscall"
@@ -46,7 +46,7 @@ func NewKafkaPublisher() (sarama.SyncProducer, error) {
 	cfg.Producer.Retry.Max = 5
 	prod, err := sarama.NewSyncProducer(brokers, cfg)
 	if err != nil {
-		log.Println("NewKafkaPublisher-err: {}", err)
+		logger.Error("NewKafkaPublisher-err: %v", err)
 		return nil, err
 	}
 	return prod, nil
@@ -95,7 +95,7 @@ func pollLoop(ctx context.Context, db *gorm.DB, batch int, lease time.Duration, 
 		rows, err := claimBatch(ctx, db, batch, lease)
 		if err != nil {
 			// log: claim lỗi → nghỉ một nhịp rồi thử lại
-			fmt.Print("could not claim batch: {}", err)
+			logger.Error("claimBatch-err: %v", err)
 			select {
 			case <-time.After(time.Second):
 			case <-ctx.Done():
@@ -181,10 +181,11 @@ func randInt(min, max int) int {
 
 func PublishWithProducer(prod sarama.SyncProducer) func(ctx context.Context, payload []byte) error {
 	return func(ctx context.Context, payload []byte) error {
-		log.Println("publishing payload:", string(payload))
+
 		var ev dispatchEventLite
 		if err := json.Unmarshal(payload, &ev); err != nil || strings.TrimSpace(ev.NotificationID) == "" {
-			return fmt.Errorf("invalid payload: missing NotificationID: %w", err)
+			logger.Error("invalid payload: missing NotificationID: %w", err)
+			return nil
 		}
 		msg := &sarama.ProducerMessage{
 			Topic: "notifications",
@@ -194,7 +195,7 @@ func PublishWithProducer(prod sarama.SyncProducer) func(ctx context.Context, pay
 		done := make(chan error, 1)
 		go func() {
 			_, _, err := prod.SendMessage(msg)
-			log.Println("published message: {}", err)
+			logger.Info("published message: %v", err)
 			done <- err
 		}()
 		select {
@@ -211,14 +212,15 @@ func PublishWithProducer(prod sarama.SyncProducer) func(ctx context.Context, pay
 
 func main() {
 	gdb, err := db.Open()
+
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	}
 
 	// unwrap sql.DB for pool config
 	sqlDB, err := gdb.DB()
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	}
 	defer sqlDB.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -230,7 +232,7 @@ func main() {
 	publishFn := PublishWithProducer(prod)
 
 	if err := pollLoop(ctx, gdb, 100, 30*time.Second, 1*time.Second, publishFn); err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	}
 
 }
